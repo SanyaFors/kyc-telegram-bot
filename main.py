@@ -31,14 +31,17 @@ try:
 except Exception as e:
     print(f"🚨 Помилка підключення до Google Sheets: {e}")
     # Відправка повідомлення адміну про помилку
-    if ADMIN_ID:
-        error_msg = "🔴 Помилка підключення до Google Sheets. Терміново перевірте логи!"
-      
-      async def notify_admin(error_msg: str):
+if ADMIN_ID:
+    error_msg = "🔴 Помилка підключення до Google Sheets. Терміново перевірте логи!"
+    
+    async def notify_admin(error_msg: str):
         try:
-        await bot.send_message(ADMIN_ID, error_msg)
-    except Exception as e:
-        print(f"Не вдалося відправити помилку адміну: {e}")
+            await bot.send_message(ADMIN_ID, error_msg)
+        except Exception as e:
+            print(f"Не вдалося відправити помилку адміну: {e}")
+    
+    # Виклик функції (якщо потрібно)
+    # await notify_admin(error_msg)  # Розкоментуйте, якщо потрібно негайно викликати
 
 # Головне меню
 main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
