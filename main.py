@@ -1,6 +1,8 @@
 import os
 import json
+import threading
 from datetime import datetime
+from flask import Flask
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton, 
                           ReplyKeyboardRemove, InlineKeyboardMarkup, 
@@ -10,6 +12,13 @@ from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+
+# Ініціалізація Flask для Render
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running", 200
 
 # Ініціалізація бота через змінні середовища
 storage = MemoryStorage()
@@ -31,17 +40,14 @@ try:
 except Exception as e:
     print(f"🚨 Помилка підключення до Google Sheets: {e}")
     # Відправка повідомлення адміну про помилку
-if ADMIN_ID:
-    error_msg = "🔴 Помилка підключення до Google Sheets. Терміново перевірте логи!"
-    
-    async def notify_admin(error_msg: str):
-        try:
-            await bot.send_message(ADMIN_ID, error_msg)
-        except Exception as e:
-            print(f"Не вдалося відправити помилку адміну: {e}")
-    
-    # Виклик функції (якщо потрібно)
-    # await notify_admin(error_msg)  # Розкоментуйте, якщо потрібно негайно викликати
+    if ADMIN_ID:
+        error_msg = "🔴 Помилка підключення до Google Sheets. Терміново перевірте логи!"
+        
+        async def notify_admin(error_msg: str):
+            try:
+                await bot.send_message(ADMIN_ID, error_msg)
+            except Exception as e:
+                print(f"Не вдалося відправити помилку адміну: {e}")
 
 # Головне меню
 main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -165,7 +171,7 @@ Username: {'@' + user.username if user.username else 'немає'}
         await message.answer(
             "✅ Дякуємо, вашу заявку отримано!\n"
             "🔗 Долучайтесь до нашої групи з завданнями:\n"
-            "👉 https://t.me/destorkycteam"
+            "👉 https://t.me/destorkycteam\n"
             "❗ По будь яким питанням можете писати менеджеру в описі групи.",
             parse_mode="Markdown",
             reply_markup=main_menu
@@ -173,4 +179,10 @@ Username: {'@' + user.username if user.username else 'немає'}
     await state.finish()
 
 if __name__ == '__main__':
+    # Запускаємо Flask у окремому потоці для Render
+    threading.Thread(
+        target=lambda: app.run(host='0.0.0.0', port=10000, debug=False, use_reloader=False)
+    ).start()
+    
+    # Запускаємо бота
     executor.start_polling(dp, skip_updates=True)
