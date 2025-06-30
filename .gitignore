@@ -1,0 +1,9 @@
+# Конфіденційні дані
+credentials.json
+.env
+
+# Службові файли
+__pycache__/
+*.log
+*.pyc
+.DS_Store
