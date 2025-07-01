@@ -1,6 +1,7 @@
 import os
 import json
 import threading
+import asyncio
 from datetime import datetime
 from flask import Flask
 from aiogram import Bot, Dispatcher, executor, types
@@ -20,15 +21,14 @@ app = Flask(__name__)
 def home():
     return "Bot is running", 200
 
-# Ініціалізація бота через змінні середовища
+# Ініціалізація бота
 storage = MemoryStorage()
-bot = Bot(token=os.getenv("BOT_TOKEN"))  # Токен з Render
-ADMIN_ID = os.getenv("ADMIN_ID")         # Ваш Telegram ID
+bot = Bot(token=os.getenv("BOT_TOKEN"))
+ADMIN_ID = os.getenv("ADMIN_ID")
 dp = Dispatcher(bot, storage=storage)
 
 # Конфігурація Google Sheets
 try:
-    # Отримання облікових даних з змінної середовища
     creds_json = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -39,23 +39,28 @@ try:
     sheet = client.open(os.getenv("SHEET_NAME", "KYC Заявки")).sheet1
 except Exception as e:
     print(f"🚨 Помилка підключення до Google Sheets: {e}")
-    # Відправка повідомлення адміну про помилку
     if ADMIN_ID:
-        error_msg = "🔴 Помилка підключення до Google Sheets. Терміново перевірте логи!"
-        
-        async def notify_admin(error_msg: str):
-            try:
-                await bot.send_message(ADMIN_ID, error_msg)
-            except Exception as e:
-                print(f"Не вдалося відправити помилку адміну: {e}")
+        asyncio.run(bot.send_message(ADMIN_ID, f"🔴 Помилка підключення до Google Sheets: {e}"))
 
-# Головне меню
+# Меню
 main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
 main_menu.add(KeyboardButton('ℹ️ Інфо'))
 main_menu.add(KeyboardButton('📝 Заповнити заявку'))
 main_menu.add(KeyboardButton('❓ FAQ'))
 
-# Обробник команди /start
+# Стани для заявки
+class ApplicationStates(StatesGroup):
+    name = State()
+    age = State()
+    city = State()
+    experience = State()
+    phone = State()
+
+async def on_startup(dp):
+    print("🟢 Бот успішно запущений!")
+    if ADMIN_ID:
+        await bot.send_message(ADMIN_ID, "🔵 Бот перезапустився")
+
 @dp.message_handler(commands=['start'])
 async def send_welcome(message: types.Message):
     welcome_text = """
@@ -70,7 +75,6 @@ async def send_welcome(message: types.Message):
     """
     await message.answer(welcome_text, parse_mode="Markdown", reply_markup=main_menu)
 
-# Обробник кнопки "Інфо"
 @dp.message_handler(text='ℹ️ Інфо')
 async def send_info(message: types.Message):
     info_text = """
@@ -90,7 +94,6 @@ async def send_info(message: types.Message):
     """
     await message.answer(info_text, parse_mode="Markdown")
 
-# Обробник кнопки "FAQ"
 @dp.message_handler(text='❓ FAQ')
 async def send_faq(message: types.Message):
     faq_text = """
@@ -110,22 +113,12 @@ async def send_faq(message: types.Message):
    - Так, ми працюємо тільки з офіційними біржами
     """
     await message.answer(faq_text, parse_mode="Markdown")
-  
-# Стани для заявки
-class ApplicationStates(StatesGroup):
-    name = State()
-    age = State()
-    city = State()
-    experience = State()
-    phone = State()
 
-# Обробник кнопки "Заповнити заявку"
 @dp.message_handler(text='📝 Заповнити заявку')
 async def start_application(message: types.Message):
     await message.answer("✍️ Відповідай на питання по одному. Почнемо!\n\n1. Ваше Ім'я та нік в Telegram?", reply_markup=ReplyKeyboardRemove())
     await ApplicationStates.name.set()
 
-# Обробник відповідей на заявку
 @dp.message_handler(state=ApplicationStates.name)
 async def process_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
@@ -160,8 +153,8 @@ async def process_phone(message: types.Message, state: FSMContext):
         data['phone'] = message.text
         user = message.from_user
         
-        # Запис у Google Таблицю
         try:
+            # Запис у Google Таблицю
             row = [
                 datetime.now().strftime("%Y-%m-%d %H:%M"),
                 data['name'],
@@ -174,13 +167,9 @@ async def process_phone(message: types.Message, state: FSMContext):
                 f"{user.first_name or ''} {user.last_name or ''}".strip()
             ]
             sheet.append_row(row)
-        except Exception as e:
-            print(f"🚨 Помилка запису в Google Sheets: {e}")
-            if ADMIN_ID:
-                await bot.send_message(ADMIN_ID, f"Помилка запису заявки: {e}")
-        
-        # Повідомлення адміну
-        admin_msg = f"""
+            
+            # Повідомлення адміну
+            admin_msg = f"""
 📄 *Нова заявка!*
 🕒 {datetime.now().strftime("%d.%m.%Y %H:%M")}
 
@@ -194,48 +183,46 @@ async def process_phone(message: types.Message, state: FSMContext):
 ID: {user.id}
 Username: {'@' + user.username if user.username else 'немає'}
 Ім'я: {user.first_name or ''} {user.last_name or ''}
-        """
-        
-        await bot.send_message(
-            ADMIN_ID,
-            admin_msg,
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup().add(
-                InlineKeyboardButton(
-                    "Написати користувачу",
-                    url=f"tg://user?id={user.id}"
+            """
+            
+            await bot.send_message(
+                ADMIN_ID,
+                admin_msg,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton(
+                        "Написати користувачу",
+                        url=f"tg://user?id={user.id}"
+                    )
                 )
             )
-        )
-        
-        # Відповідь користувачу
-        await message.answer(
-            "✅ Дякуємо, вашу заявку отримано!\n"
-            "🔗 Долучайтесь до нашої групи з завданнями:\n"
-            "👉 https://t.me/+06666cc2_TwwMDZi\n"
-            "❗ По будь яким питанням можете писати менеджеру в описі групи.",
-            parse_mode="Markdown",
-            reply_markup=main_menu
-        )
+            
+            # Відповідь користувачу
+            await message.answer(
+                "✅ Дякуємо, вашу заявку отримано!\n"
+                "🔗 Долучайтесь до нашої групи з завданнями:\n"
+                "👉 https://t.me/+06666cc2_TwwMDZi\n"
+                "❗ По будь яким питанням можете писати менеджеру в описі групи.",
+                parse_mode="Markdown",
+                reply_markup=main_menu
+            )
+            
+        except Exception as e:
+            print(f"🚨 Помилка: {e}")
+            if ADMIN_ID:
+                await bot.send_message(ADMIN_ID, f"Помилка запису заявки: {e}")
+            await message.answer(
+                "❌ Виникла помилка при обробці заявки. Спробуйте пізніше або зв'яжіться з адміністратором.",
+                reply_markup=main_menu
+            )
+    
     await state.finish()
 
 if __name__ == '__main__':
-    # Запускаємо Flask у окремому потоці для Render
+    # Запускаємо Flask у окремому потоці
     threading.Thread(
         target=lambda: app.run(host='0.0.0.0', port=10000, debug=False, use_reloader=False)
     ).start()
     
     # Запускаємо бота
-    executor.start_polling(dp, skip_updates=True)
-
-    # ... (весь ваш попередній код: обробники, класи тощо) ...
-
-### Додайте цю функцію (якщо її ще немає) ###
-async def on_startup(dp):
-    print("🟢 Бот успішно запущений!")
-    # Тут можна додати додаткові дії при старті (наприклад, повідомлення адміну)
-    await bot.send_message(ADMIN_ID, "🔵 Бот перезапустився")  # Приклад
-
-### Ось де вставляти ваш рядок ###
-if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
