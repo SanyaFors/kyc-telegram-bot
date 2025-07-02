@@ -28,7 +28,6 @@ SHEET_NAME = os.getenv("SHEET_NAME", "KYC Заявки")
 
 # --- Ініціалізація Aiogram ---
 storage = MemoryStorage()
-# Ми не будемо вказувати parse_mode за замовчуванням, щоб контролювати його в кожному повідомленні
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
@@ -165,69 +164,73 @@ async def process_experience(message: types.Message, state: FSMContext):
 
 @dp.message_handler(state=ApplicationStates.phone)
 async def process_phone(message: types.Message, state: FSMContext):
+    # Зберігаємо останні дані та отримуємо всю інформацію
     async with state.proxy() as data:
         data['phone'] = message.text
-        user = message.from_user
+        user_data = data.as_dict()
+    
+    user = message.from_user
 
-        # --- ГОЛОВНЕ ВИПРАВЛЕННЯ: Повністю прибираємо форматування з повідомлень ---
-        admin_message = (
-            f"📨 Нова заявка:\n\n"
-            f"Ім'я: {data['name']}\n"
-            f"Вік: {data['age']}\n"
-            f"Місто: {data['city']}\n"
-            f"Документи: {data['documents']}\n"
-            f"Досвід: {data['experience']}\n"
-            f"Контакт: {data['phone']}\n\n"
-            f"Від користувача: @{user.username or 'N/A'} (ID: {user.id})"
-        )
-        
-        await message.answer(
+    # 1. Запис у Google Sheets
+    try:
+        if sheet:
+            sheet_row = [
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                user_data.get('name', ''), user_data.get('age', ''), user_data.get('city', ''),
+                user_data.get('documents', ''), user_data.get('experience', ''), user_data.get('phone', ''),
+                str(user.id),
+                f"@{user.username}" if user.username else "немає",
+                f"{user.first_name or ''} {user.last_name or ''}".strip()
+            ]
+            sheet.append_row(sheet_row)
+            logging.info(f"Записано нову заявку в Google Sheets від {user.id}")
+    except Exception as e:
+        logging.error(f"❌ Помилка запису в Google Sheets для {user.id}: {e}")
+
+    # 2. Відправка повідомлення адміну
+    try:
+        if ADMIN_ID:
+            admin_text = (
+                f"📨 Нова заявка:\n\n"
+                f"Ім'я: {user_data.get('name', '')}\n"
+                f"Вік: {user_data.get('age', '')}\n"
+                f"Місто: {user_data.get('city', '')}\n"
+                f"Документи: {user_data.get('documents', '')}\n"
+                f"Досвід: {user_data.get('experience', '')}\n"
+                f"Контакт: {user_data.get('phone', '')}\n\n"
+                f"Від користувача: @{user.username or 'N/A'} (ID: {user.id})"
+            )
+            await bot.send_message(
+                ADMIN_ID,
+                admin_text,
+                reply_markup=InlineKeyboardMarkup().add(
+                    InlineKeyboardButton("✍️ Написати користувачу", url=f"tg://user?id={user.id}")
+                )
+            )
+    except Exception as e:
+        logging.error(f"❌ Помилка відправки повідомлення адміну для заявки {user.id}: {e}")
+
+    # 3. Відправка повідомлення користувачу
+    try:
+        # ВИПРАВЛЕНО: Змінна тепер має правильну назву
+        final_user_message = (
                 "✅ Дякуємо, вашу заявку отримано!\n"
                 "🔗 Долучайтесь до нашої групи з завданнями:\n"
                 "👉 https://t.me/+06666cc2_TwwMDZi\n"
                 "❗ По будь яким питанням можете писати менеджеру в описі групи."
         )
-        
-        sheet_row = [
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            data['name'], data['age'], data['city'],
-            data['documents'], data['experience'], data['phone'],
-            str(user.id),
-            f"@{user.username}" if user.username else "немає",
-            f"{user.first_name or ''} {user.last_name or ''}".strip()
-        ]
-
-    try:
-        if sheet:
-            sheet.append_row(sheet_row)
-            logging.info(f"Записано нову заявку в Google Sheets від {user.id}")
-
-        if ADMIN_ID:
-            # Надсилаємо адміну без форматування
-            await bot.send_message(
-                ADMIN_ID,
-                admin_message,
-                reply_markup=InlineKeyboardMarkup().add(
-                    InlineKeyboardButton("✍️ Написати користувачу", url=f"tg://user?id={user.id}")
-                ),
-                parse_mode=None
-            )
-
-        # Надсилаємо користувачу без форматування
         await message.answer(
-            user_message,
+            final_user_message,
             reply_markup=main_menu,
-            parse_mode=None
         )
-
     except Exception as e:
-        logging.error(f"❌ Помилка при фіналізації заявки від {user.id}: {e}")
-        if ADMIN_ID:
-            await bot.send_message(ADMIN_ID, f"❌ Помилка запису заявки від {user.id}:\n{e}", parse_mode=None)
-        await message.answer("❌ Сталася невідома помилка. Спробуйте, будь ласка, пізніше.", reply_markup=main_menu)
-    
-    finally:
-        await state.finish()
+        logging.error(f"❌ Помилка відправки фінального повідомлення користувачу {user.id}: {e}")
+        # Якщо навіть це не спрацювало, надсилаємо максимально просте повідомлення
+        await message.answer("Дякуємо, вашу заявку отримано!")
+
+    # 4. Завершення стану
+    await state.finish()
+
 
 # --- Налаштування Webhook для Flask ---
 
