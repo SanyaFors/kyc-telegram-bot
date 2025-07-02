@@ -9,6 +9,8 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton,
                            ReplyKeyboardRemove, InlineKeyboardMarkup,
                            InlineKeyboardButton)
+# --- ГОЛОВНЕ ВИПРАВЛЕННЯ: Імпортуємо функцію для екранування ---
+from aiogram.utils.markdown import escape_md
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
@@ -28,7 +30,8 @@ SHEET_NAME = os.getenv("SHEET_NAME", "KYC Заявки")
 
 # --- Ініціалізація Aiogram ---
 storage = MemoryStorage()
-bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.MARKDOWN)
+# Встановлюємо Markdown V2, оскільки він більш строгий і надійний
+bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.MARKDOWN_V2)
 dp = Dispatcher(bot, storage=storage)
 
 # --- Підключення до Google Sheets ---
@@ -50,7 +53,8 @@ try:
 except Exception as e:
     logging.error(f"❌ Помилка підключення до Google Sheets: {e}")
     if ADMIN_ID:
-        asyncio.run(bot.send_message(ADMIN_ID, f"❌ Помилка підключення до Google Sheets: {e}"))
+        # Для відправки повідомлення про помилку краще не використовувати форматування
+        asyncio.run(bot.send_message(ADMIN_ID, f"Помилка підключення до Google Sheets: {e}"))
 
 # --- Клавіатури ---
 main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -73,29 +77,30 @@ class ApplicationStates(StatesGroup):
 async def send_welcome(message: types.Message, state: FSMContext):
     await state.finish()
     text = """
-Привіт! 👋 Це офіційний бот проєкту KYC Team — підробіток на проходженні верифікації (KYC) на криптобіржах 💼
+Привіт\! 👋 Це офіційний бот проєкту KYC Team — підробіток на проходженні верифікації \(KYC\) на криптобіржах 💼
 
 🔒 Безпечно  
 💸 Від 100 до 400 грн за заявку  
 🕐 10–20 хвилин  
-📱 Потрібно лише Паспорт/ID + селфі
+📱 Потрібно лише Паспорт/ID \+ селфі
 
-⬇️ Обери, що тебе цікавить нижче на кнопках щоб дізнатися більше.
+⬇️ Обери, що тебе цікавить нижче на кнопках щоб дізнатися більше\.
 """
     await message.answer(text, reply_markup=main_menu)
 
 @dp.message_handler(text='ℹ️ Інфо', state='*')
 async def send_info(message: types.Message):
+    # У простому тексті без даних від користувача можна використовувати Markdown V2 без побоювань
     await message.answer("""
-🔹 *Хто ми?* Ми допомагаємо людям заробити на проходженні верифікацій (KYC) для криптобірж.
+🔹 *Хто ми?* Ми допомагаємо людям заробити на проходженні верифікацій \(KYC\) для криптобірж\.
 
-🔹 *Як це працює?* 1. Ти заходиш в акаунт по нашим даним або ж по посиланню (інструкції даємо)  
-2. Проходиш верифікацію  
-3. Отримуєш оплату відразу після перевірки
+🔹 *Як це працює?* 1\. Ти заходиш в акаунт по нашим даним або ж по посиланню \(інструкції даємо\)  
+2\. Проходиш верифікацію  
+3\. Отримуєш оплату відразу після перевірки
 
-🔹 *Законно?* Так. Це не шахрайство, не банки, не кредити.
+🔹 *Законно?* Так\. Це не шахрайство, не банки, не кредити\.
 
-🔹 *Скільки платимо?* 100–400 грн за заявку (заявок може бути багато). Виплата одразу після підтвердження.
+🔹 *Скільки платимо?* 100–400 грн за заявку \(заявок може бути багато\)\. Виплата одразу після підтвердження\.
 """)
 
 @dp.message_handler(text='❓ FAQ', state='*')
@@ -103,23 +108,23 @@ async def send_faq(message: types.Message):
     await message.answer("""
 ❓ *Часті питання:*
     
-1. *Які документи потрібні?*
-   - Паспорт або ID-карта, водійське, загран
-   - Селфі з документом
+1\. *Які документи потрібні?*
+   \- Паспорт або ID\-карта, водійське, загран
+   \- Селфі з документом
 
-2. *Як відбувається оплата?*
-   - На карту або криптовалюту після успішної верифікації
+2\. *Як відбувається оплата?*
+   \- На карту або криптовалюту після успішної верифікації
 
-3. *Скільки часу займає?*
-   - Від 10 до 20 хвилин на одну заявку
+3\. *Скільки часу займає?*
+   \- Від 10 до 20 хвилин на одну заявку
 
-4. *Чи це безпечно?*
-   - Так, ми працюємо тільки з офіційними біржами
+4\. *Чи це безпечно?*
+   \- Так, ми працюємо тільки з офіційними біржами
 """)
 
 @dp.message_handler(text='📝 Заповнити заявку', state='*')
 async def start_application(message: types.Message):
-    await message.answer("✍️ Відповідай на питання по одному. Почнемо!\n\n*1. Ваше Ім'я та нік в Telegram?*", reply_markup=ReplyKeyboardRemove())
+    await message.answer("*1\. Ваше Ім'я та нік в Telegram?*", reply_markup=ReplyKeyboardRemove())
     await ApplicationStates.name.set()
 
 # --- Ланцюжок обробників для анкети ---
@@ -128,38 +133,38 @@ async def start_application(message: types.Message):
 async def process_name(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['name'] = message.text
-    await message.answer("*2. Скільки вам повних років?*")
+    await message.answer("*2\. Скільки вам повних років?*")
     await ApplicationStates.next()
 
 @dp.message_handler(state=ApplicationStates.age)
 async def process_age(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
-        await message.answer("Будь ласка, введіть вік числом.")
+        await message.answer("Будь ласка, введіть вік числом\.")
         return
     async with state.proxy() as data:
         data['age'] = message.text
-    await message.answer("*3. З якого ви міста?*")
+    await message.answer("*3\. З якого ви міста?*")
     await ApplicationStates.next()
 
 @dp.message_handler(state=ApplicationStates.city)
 async def process_city(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['city'] = message.text
-    await message.answer("*4. Які документи маєте (наприклад: Паспорт, ID-карта, водійське)?*")
+    await message.answer("*4\. Які документи маєте \(наприклад: Паспорт, ID\-карта, водійське\)?*")
     await ApplicationStates.next()
 
 @dp.message_handler(state=ApplicationStates.documents)
 async def process_documents(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['documents'] = message.text
-    await message.answer("*5. Чи проходили раніше верифікації (якщо так, то де саме)?*")
+    await message.answer("*5\. Чи проходили раніше верифікації \(якщо так, то де саме\)?*")
     await ApplicationStates.next()
 
 @dp.message_handler(state=ApplicationStates.experience)
 async def process_experience(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['experience'] = message.text
-    await message.answer("*6. Ваш номер телефону для зв'язку?*")
+    await message.answer("*6\. Ваш номер телефону для зв'язку?*")
     await ApplicationStates.next()
 
 @dp.message_handler(state=ApplicationStates.phone)
@@ -168,15 +173,16 @@ async def process_phone(message: types.Message, state: FSMContext):
         data['phone'] = message.text
         user = message.from_user
 
+        # --- ГОЛОВНЕ ВИПРАВЛЕННЯ: Екрануємо всі дані від користувача ---
         admin_message = (
             f"📨 *Нова заявка:*\n\n"
-            f"▪️ *Ім'я:* {data['name']}\n"
-            f"▪️ *Вік:* {data['age']}\n"
-            f"▪️ *Місто:* {data['city']}\n"
-            f"▪️ *Документи:* {data['documents']}\n"
-            f"▪️ *Досвід:* {data['experience']}\n"
-            f"▪️ *Контакт:* {data['phone']}\n\n"
-            f"👤 Від: @{user.username or 'N/A'} (ID: `{user.id}`)"
+            f"▪️ *Ім'я:* {escape_md(data['name'])}\n"
+            f"▪️ *Вік:* {escape_md(data['age'])}\n"
+            f"▪️ *Місто:* {escape_md(data['city'])}\n"
+            f"▪️ *Документи:* {escape_md(data['documents'])}\n"
+            f"▪️ *Досвід:* {escape_md(data['experience'])}\n"
+            f"▪️ *Контакт:* {escape_md(data['phone'])}\n\n"
+            f"👤 Від: @{escape_md(user.username or 'N/A')} \(ID: `{user.id}`\)"
         )
         
         sheet_row = [
@@ -214,7 +220,7 @@ async def process_phone(message: types.Message, state: FSMContext):
         logging.error(f"❌ Помилка при фіналізації заявки від {user.id}: {e}")
         if ADMIN_ID:
             await bot.send_message(ADMIN_ID, f"❌ Помилка запису заявки: {e}")
-        await message.answer("❌ Сталася невідома помилка. Спробуйте, будь ласка, пізніше.", reply_markup=main_menu)
+        await message.answer("❌ Сталася невідома помилка\. Спробуйте, будь ласка, пізніше\.", reply_markup=main_menu)
     
     finally:
         await state.finish()
@@ -223,9 +229,8 @@ async def process_phone(message: types.Message, state: FSMContext):
 
 @app.route('/webhook', methods=["POST"])
 def webhook_handler():
-    # Встановлюємо контекст для бота та диспетчера
     Bot.set_current(bot)
-    Dispatcher.set_current(dp) # <--- ОСЬ ЦЕ ГОЛОВНЕ ВИПРАВЛЕННЯ
+    Dispatcher.set_current(dp)
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
@@ -251,6 +256,5 @@ async def on_shutdown(_):
     logging.info("Видалення вебхука...")
     await bot.delete_webhook()
 
-# Цей блок не виконується на Render, оскільки він використовує WSGI сервер (Gunicorn)
 if __name__ == '__main__':
     pass
