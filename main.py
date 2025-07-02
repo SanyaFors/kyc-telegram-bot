@@ -12,6 +12,7 @@ from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton,
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
+import logging
 
 # Flask
 app = Flask(__name__)
@@ -26,6 +27,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot, storage=storage)
 
 # Google Sheets
+sheet = None
 try:
     creds_json = json.loads(os.getenv("GOOGLE_CREDS_JSON"))
     scope = [
@@ -38,7 +40,7 @@ try:
 except Exception as e:
     print(f"\u26a0\ufe0f Google Sheets помилка: {e}")
     if ADMIN_ID:
-        asyncio.get_event_loop().create_task(bot.send_message(ADMIN_ID, f"\u274c Помилка підключення до Google Sheets: {e}"))
+        asyncio.run(bot.send_message(ADMIN_ID, f"\u274c Помилка підключення до Google Sheets: {e}"))
 
 # Меню
 main_menu = ReplyKeyboardMarkup(resize_keyboard=True)
@@ -71,8 +73,7 @@ async def send_welcome(message: types.Message):
 
 @dp.message_handler(text='ℹ\ufe0f Інфо')
 async def send_info(message: types.Message):
-    await message.answer(
-        """
+    await message.answer("""
 🔹 Хто ми?  
 Ми допомагаємо людям заробити на проходженні верифікацій (KYC) для криптобірж.
 
@@ -155,7 +156,8 @@ async def process_phone(message: types.Message, state: FSMContext):
                 f"@{user.username}" if user.username else "немає",
                 f"{user.first_name or ''} {user.last_name or ''}".strip()
             ]
-            sheet.append_row(row)
+            if sheet:
+                sheet.append_row(row)
 
             await bot.send_message(
                 ADMIN_ID,
@@ -182,9 +184,12 @@ async def process_phone(message: types.Message, state: FSMContext):
 
 # Webhook endpoint
 @app.route('/webhook', methods=["POST"])
-async def webhook():
-    update = types.Update(**request.json)
-    await dp.process_update(update)
+def webhook():
+    try:
+        update = types.Update(**request.json)
+        asyncio.run(dp.process_update(update))
+    except Exception as e:
+        logging.exception("Webhook error")
     return "ok", 200
 
 # Health check
@@ -198,6 +203,6 @@ async def on_startup():
     print(f"✅ Webhook встановлено: {WEBHOOK_URL}")
 
 if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    loop.create_task(on_startup())
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(on_startup())
     app.run(host='0.0.0.0', port=10000)
