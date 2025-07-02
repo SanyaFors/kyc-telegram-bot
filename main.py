@@ -21,11 +21,11 @@ app = Flask(__name__)
 def home():
     return "Bot is running", 200
 
-# Ініціалізація бота
-storage = MemoryStorage()
+# Глобальні змінні для бота
 bot = Bot(token=os.getenv("BOT_TOKEN"))
-ADMIN_ID = os.getenv("ADMIN_ID")
+storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
+ADMIN_ID = os.getenv("ADMIN_ID")
 
 # Конфігурація Google Sheets
 try:
@@ -58,6 +58,7 @@ class ApplicationStates(StatesGroup):
 
 async def on_startup(dp):
     print("🟢 Бот успішно запущений!")
+    await bot.delete_webhook(drop_pending_updates=True)
     if ADMIN_ID:
         await bot.send_message(ADMIN_ID, "🔵 Бот перезапустився")
 
@@ -224,5 +225,5 @@ if __name__ == '__main__':
         target=lambda: app.run(host='0.0.0.0', port=10000, debug=False, use_reloader=False)
     ).start()
     
-    # Запускаємо бота
+    # Запускаємо бота зі скиданням вебхука
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
