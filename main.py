@@ -28,7 +28,6 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 SHEET_NAME = os.getenv("SHEET_NAME", "KYC Заявки")
 
 # --- Ініціалізація Aiogram ---
-# ВИПРАВЛЕНО: Повертаємось до стандартного, надійного режиму Markdown
 storage = MemoryStorage()
 bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.MARKDOWN)
 dp = Dispatcher(bot, storage=storage)
@@ -84,7 +83,7 @@ async def send_welcome(message: types.Message, state: FSMContext):
 
 ⬇️ Обери, що тебе цікавить нижче на кнопках щоб дізнатися більше.
 """
-    await message.answer(text, reply_markup=main_menu, parse_mode=None) # Надсилаємо без форматування
+    await message.answer(text, reply_markup=main_menu, parse_mode=None)
 
 @dp.message_handler(text='ℹ️ Інфо', state='*')
 async def send_info(message: types.Message):
@@ -170,15 +169,20 @@ async def process_phone(message: types.Message, state: FSMContext):
         data['phone'] = message.text
         user = message.from_user
 
+        # --- ГОЛОВНЕ ВИПРАВЛЕННЯ: Формуємо повідомлення для адміна найнадійнішим способом ---
+        # Поміщаємо всі дані від користувача в блок коду (```), де форматування не працює.
+        user_data_block = (
+            f"Ім'я:       {data['name']}\n"
+            f"Вік:        {data['age']}\n"
+            f"Місто:      {data['city']}\n"
+            f"Документи:  {data['documents']}\n"
+            f"Досвід:     {data['experience']}\n"
+            f"Контакт:    {data['phone']}"
+        )
+
         admin_message = (
-            f"📨 *Нова заявка:*\n\n"
-            f"▪️ *Ім'я:* {escape_md(data['name'])}\n"
-            f"▪️ *Вік:* {escape_md(data['age'])}\n"
-            f"▪️ *Місто:* {escape_md(data['city'])}\n"
-            f"▪️ *Документи:* {escape_md(data['documents'])}\n"
-            f"▪️ *Досвід:* {escape_md(data['experience'])}\n"
-            f"▪️ *Контакт:* {escape_md(data['phone'])}\n\n"
-            f"👤 Від: @{escape_md(user.username or 'N/A')} (ID: `{user.id}`)"
+            f"📨 *Нова заявка від @{escape_md(user.username or 'N/A')}*\n\n"
+            f"```{user_data_block}```"
         )
         
         sheet_row = [
@@ -215,7 +219,8 @@ async def process_phone(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"❌ Помилка при фіналізації заявки від {user.id}: {e}")
         if ADMIN_ID:
-            await bot.send_message(ADMIN_ID, f"❌ Помилка запису заявки: {e}", parse_mode=None)
+            # Надсилаємо повідомлення про помилку без форматування, щоб уникнути нових помилок
+            await bot.send_message(ADMIN_ID, f"❌ Помилка запису заявки від {user.id}:\n{e}", parse_mode=None)
         await message.answer("❌ Сталася невідома помилка. Спробуйте, будь ласка, пізніше.", reply_markup=main_menu, parse_mode=None)
     
     finally:
