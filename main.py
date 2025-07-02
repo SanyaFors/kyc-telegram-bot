@@ -181,7 +181,7 @@ async def process_phone(message: types.Message, state: FSMContext):
     await state.finish()
 
 # Webhook endpoint
-@app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=["POST"])
 async def webhook():
     update = types.Update(**request.json)
     await dp.process_update(update)
