@@ -215,11 +215,11 @@ async def process_phone(message: types.Message, state: FSMContext):
         await message.answer(
             "✅ Дякуємо, вашу заявку отримано!\n"
 
-                "🔗 Долучайтесь до нашої групи з завданнями:\n"
+            "🔗 Долучайтесь до нашої групи з завданнями:\n"
 
-                "👉 https://t.me/+06666cc2_TwwMDZi\n"
+            "👉 https://t.me/+06666cc2_TwwMDZi\n"
 
-                "❗ По будь яким питанням можете писати менеджеру в описі групи.",
+            "❗ По будь яким питанням можете писати менеджеру в описі групи.",
             reply_markup=main_menu
         )
 
