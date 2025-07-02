@@ -34,7 +34,6 @@ dp = Dispatcher(bot, storage=storage)
 # --- Підключення до Google Sheets ---
 sheet = None
 try:
-    # Перевіряємо, чи існує змінна середовища
     creds_json_str = os.getenv("GOOGLE_CREDS_JSON")
     if not creds_json_str:
         logging.warning("⚠️  Змінна GOOGLE_CREDS_JSON не знайдена. Робота з Google Sheets буде неможлива.")
@@ -50,7 +49,6 @@ try:
         logging.info("✅ Успішно підключено до Google Sheets.")
 except Exception as e:
     logging.error(f"❌ Помилка підключення до Google Sheets: {e}")
-    # Спроба надіслати повідомлення адміну, якщо це можливо на старті
     if ADMIN_ID:
         asyncio.run(bot.send_message(ADMIN_ID, f"❌ Помилка підключення до Google Sheets: {e}"))
 
@@ -61,7 +59,6 @@ main_menu.add(KeyboardButton('📝 Заповнити заявку'))
 main_menu.add(KeyboardButton('❓ FAQ'))
 
 # --- Машина станів (FSM) для анкети ---
-# ВИПРАВЛЕНО: Стани перейменовані для ясності та додано новий стан
 class ApplicationStates(StatesGroup):
     name = State()
     age = State()
@@ -74,7 +71,7 @@ class ApplicationStates(StatesGroup):
 
 @dp.message_handler(commands=['start'], state='*')
 async def send_welcome(message: types.Message, state: FSMContext):
-    await state.finish() # Скидаємо стан, якщо користувач ввів /start посеред анкети
+    await state.finish()
     text = """
 Привіт! 👋 Це офіційний бот проєкту KYC Team — підробіток на проходженні верифікації (KYC) на криптобіржах 💼
 
@@ -87,7 +84,7 @@ async def send_welcome(message: types.Message, state: FSMContext):
 """
     await message.answer(text, reply_markup=main_menu)
 
-@dp.message_handler(text='ℹ️ Інфо')
+@dp.message_handler(text='ℹ️ Інфо', state='*')
 async def send_info(message: types.Message):
     await message.answer("""
 🔹 *Хто ми?* Ми допомагаємо людям заробити на проходженні верифікацій (KYC) для криптобірж.
@@ -101,7 +98,7 @@ async def send_info(message: types.Message):
 🔹 *Скільки платимо?* 100–400 грн за заявку (заявок може бути багато). Виплата одразу після підтвердження.
 """)
 
-@dp.message_handler(text='❓ FAQ')
+@dp.message_handler(text='❓ FAQ', state='*')
 async def send_faq(message: types.Message):
     await message.answer("""
 ❓ *Часті питання:*
@@ -120,7 +117,7 @@ async def send_faq(message: types.Message):
    - Так, ми працюємо тільки з офіційними біржами
 """)
 
-@dp.message_handler(text='📝 Заповнити заявку')
+@dp.message_handler(text='📝 Заповнити заявку', state='*')
 async def start_application(message: types.Message):
     await message.answer("✍️ Відповідай на питання по одному. Почнемо!\n\n*1. Ваше Ім'я та нік в Telegram?*", reply_markup=ReplyKeyboardRemove())
     await ApplicationStates.name.set()
@@ -151,7 +148,6 @@ async def process_city(message: types.Message, state: FSMContext):
     await message.answer("*4. Які документи маєте (наприклад: Паспорт, ID-карта, водійське)?*")
     await ApplicationStates.next()
 
-# ВИПРАВЛЕНО: Новий обробник для документів
 @dp.message_handler(state=ApplicationStates.documents)
 async def process_documents(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
@@ -159,7 +155,6 @@ async def process_documents(message: types.Message, state: FSMContext):
     await message.answer("*5. Чи проходили раніше верифікації (якщо так, то де саме)?*")
     await ApplicationStates.next()
 
-# ВИПРАВЛЕНО: Новий обробник для досвіду
 @dp.message_handler(state=ApplicationStates.experience)
 async def process_experience(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
@@ -167,14 +162,12 @@ async def process_experience(message: types.Message, state: FSMContext):
     await message.answer("*6. Ваш номер телефону для зв'язку?*")
     await ApplicationStates.next()
 
-# ВИПРАВЛЕНО: Останній крок тепер обробляє телефон
 @dp.message_handler(state=ApplicationStates.phone)
 async def process_phone(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['phone'] = message.text
         user = message.from_user
 
-        # Формуємо повідомлення для адміна та рядок для таблиці
         admin_message = (
             f"📨 *Нова заявка:*\n\n"
             f"▪️ *Ім'я:* {data['name']}\n"
@@ -196,12 +189,10 @@ async def process_phone(message: types.Message, state: FSMContext):
         ]
 
     try:
-        # Запис у Google Sheets
         if sheet:
             sheet.append_row(sheet_row)
             logging.info(f"Записано нову заявку в Google Sheets від {user.id}")
 
-        # Надсилання повідомлення адміну
         if ADMIN_ID:
             await bot.send_message(
                 ADMIN_ID,
@@ -211,7 +202,6 @@ async def process_phone(message: types.Message, state: FSMContext):
                 )
             )
 
-        # Повідомлення користувачу
         await message.answer(
                 "✅ Дякуємо, вашу заявку отримано!\n"
                 "🔗 Долучайтесь до нашої групи з завданнями:\n"
@@ -227,16 +217,16 @@ async def process_phone(message: types.Message, state: FSMContext):
         await message.answer("❌ Сталася невідома помилка. Спробуйте, будь ласка, пізніше.", reply_markup=main_menu)
     
     finally:
-        # Завершення стану
         await state.finish()
 
 # --- Налаштування Webhook для Flask ---
 
 @app.route('/webhook', methods=["POST"])
 def webhook_handler():
-    # ГОЛОВНЕ ВИПРАВЛЕННЯ: Встановлюємо екземпляр бота в контекст
+    # Встановлюємо контекст для бота та диспетчера
     Bot.set_current(bot)
-    
+    Dispatcher.set_current(dp) # <--- ОСЬ ЦЕ ГОЛОВНЕ ВИПРАВЛЕННЯ
+
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     
@@ -261,16 +251,6 @@ async def on_shutdown(_):
     logging.info("Видалення вебхука...")
     await bot.delete_webhook()
 
+# Цей блок не виконується на Render, оскільки він використовує WSGI сервер (Gunicorn)
 if __name__ == '__main__':
-    # Цей блок не буде виконуватися на Render, оскільки він використовує WSGI сервер (напр. Gunicorn)
-    # Але він корисний для локального тестування
-    # Для запуску на Render, ви маєте вказати команду запуску, наприклад:
-    # gunicorn main:app
-    
-    # Для локального запуску можна було б використовувати polling:
-    # executor.start_polling(dp, skip_updates=True)
-    
-    # Оскільки ми використовуємо Flask, запуск відбувається через WSGI сервер.
-    # Функція on_startup буде викликана вашим сервером.
-    # Для Render цього достатньо.
     pass
