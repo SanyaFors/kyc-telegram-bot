@@ -22,7 +22,7 @@ app = Flask(__name__)
 
 # --- Конфігурація бота та константи ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = os.getenv("ADMIN_ID")
+ADMIN_ID = os.getenv("ADMIN_ID") # Ваш ID має бути тут
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 SHEET_NAME = os.getenv("SHEET_NAME", "KYC Заявки")
 
@@ -58,14 +58,22 @@ main_menu.add(KeyboardButton('ℹ️ Інфо'))
 main_menu.add(KeyboardButton('📝 Заповнити заявку'))
 main_menu.add(KeyboardButton('❓ FAQ'))
 
-# --- Машина станів (FSM) для анкети ---
+# --- Машина станів (FSM) ---
 class ApplicationStates(StatesGroup):
+    # Стани для анкети користувача
     name = State()
     age = State()
     city = State()
     documents = State()
     experience = State()
     phone = State()
+    # Новий стан для розсилки
+    broadcast_message = State()
+
+
+# --- Функція для перевірки, чи є користувач адміном ---
+def is_admin(message: types.Message):
+    return str(message.from_user.id) == str(ADMIN_ID)
 
 # --- Обробники команд та повідомлень ---
 
@@ -84,6 +92,7 @@ async def send_welcome(message: types.Message, state: FSMContext):
 """
     await message.answer(text, reply_markup=main_menu)
 
+# ... (Код для Інфо, FAQ та анкети залишається без змін) ...
 @dp.message_handler(text='ℹ️ Інфо', state='*')
 async def send_info(message: types.Message):
     await message.answer("""
@@ -122,8 +131,6 @@ async def send_faq(message: types.Message):
 async def start_application(message: types.Message):
     await message.answer("1. Ваше Ім'я та нік в Telegram?", reply_markup=ReplyKeyboardRemove())
     await ApplicationStates.name.set()
-
-# --- Ланцюжок обробників для анкети ---
 
 @dp.message_handler(state=ApplicationStates.name)
 async def process_name(message: types.Message, state: FSMContext):
@@ -165,14 +172,12 @@ async def process_experience(message: types.Message, state: FSMContext):
 
 @dp.message_handler(state=ApplicationStates.phone)
 async def process_phone(message: types.Message, state: FSMContext):
-    # Зберігаємо останні дані та отримуємо всю інформацію
     async with state.proxy() as data:
         data['phone'] = message.text
         user_data = data.as_dict()
     
     user = message.from_user
 
-    # 1. Запис у Google Sheets
     try:
         if sheet:
             sheet_row = [
@@ -188,7 +193,6 @@ async def process_phone(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"❌ Помилка запису в Google Sheets для {user.id}: {e}")
 
-    # 2. Відправка повідомлення адміну
     try:
         if ADMIN_ID:
             admin_text = (
@@ -211,26 +215,71 @@ async def process_phone(message: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"❌ Помилка відправки повідомлення адміну для заявки {user.id}: {e}")
 
-    # 3. Відправка повідомлення користувачу
     try:
-        # ВИПРАВЛЕНО: Змінна тепер має правильну назву
         final_user_message = (
-                "✅ Дякуємо, вашу заявку отримано!\n"
-                "🔗 Долучайтесь до нашої групи з завданнями:\n"
-                "👉 https://t.me/+06666cc2_TwwMDZi\n"
-                "❗ По будь яким питанням можете писати менеджеру в описі групи."
+            "✅ Дякуємо, вашу заявку отримано!\n\n"
+            "Наш менеджер зв'яжеться з вами найближчим часом.\n\n"
+            "🔗 Тим часом, долучайтесь до нашої групи з актуальними завданнями:\n"
+            "👉 https://t.me/destorkycteam"
         )
-        await message.answer(
-            final_user_message,
-            reply_markup=main_menu,
-        )
+        await message.answer(final_user_message, reply_markup=main_menu)
     except Exception as e:
         logging.error(f"❌ Помилка відправки фінального повідомлення користувачу {user.id}: {e}")
-        # Якщо навіть це не спрацювало, надсилаємо максимально просте повідомлення
         await message.answer("Дякуємо, вашу заявку отримано!")
 
-    # 4. Завершення стану
     await state.finish()
+
+
+# --- НОВИЙ БЛОК: Функції для розсилки (тільки для адміна) ---
+
+@dp.message_handler(is_admin, commands=['sendall'], state='*')
+async def start_broadcast(message: types.Message):
+    await message.answer("Надішліть повідомлення, яке потрібно розіслати всім користувачам, що заповнили анкету.")
+    await ApplicationStates.broadcast_message.set()
+
+@dp.message_handler(is_admin, state=ApplicationStates.broadcast_message, content_types=types.ContentTypes.ANY)
+async def process_broadcast_message(message: types.Message, state: FSMContext):
+    await state.finish()
+    
+    if not sheet:
+        await message.answer("❌ Неможливо виконати розсилку: немає підключення до Google Sheets.")
+        return
+
+    try:
+        # Отримуємо всі значення з 8-го стовпця (де зберігаються ID)
+        all_user_ids = sheet.col_values(8) 
+        # Видаляємо заголовок стовпця (якщо він є) і залишаємо тільки унікальні ID
+        unique_user_ids = set(all_user_ids[1:]) 
+    except Exception as e:
+        await message.answer(f"❌ Помилка читання ID з Google Sheets: {e}")
+        return
+
+    if not unique_user_ids:
+        await message.answer("Не знайдено жодного користувача для розсилки.")
+        return
+
+    await message.answer(f"✅ Починаю розсилку для {len(unique_user_ids)} користувачів...")
+
+    success_count = 0
+    error_count = 0
+
+    for user_id in unique_user_ids:
+        try:
+            # Копіюємо та надсилаємо повідомлення
+            await message.copy_to(chat_id=user_id)
+            success_count += 1
+            logging.info(f"Надіслано повідомлення користувачу {user_id}")
+        except Exception as e:
+            error_count += 1
+            logging.error(f"Не вдалося надіслати повідомлення користувачу {user_id}: {e}")
+        
+        await asyncio.sleep(0.1) # Невелика затримка, щоб не отримати бан від Telegram
+
+    await message.answer(
+        f"🏁 Розсилку завершено!\n\n"
+        f"✅ Успішно надіслано: {success_count}\n"
+        f"❌ Помилок (користувач заблокував бота): {error_count}"
+    )
 
 
 # --- Налаштування Webhook для Flask ---
