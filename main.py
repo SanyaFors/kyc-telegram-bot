@@ -13,6 +13,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import asyncio
 import logging
+import re
 
 # --- Налаштування логування ---
 logging.basicConfig(level=logging.INFO)
@@ -67,8 +68,10 @@ class ApplicationStates(StatesGroup):
     documents = State()
     experience = State()
     phone = State()
-    # Новий стан для розсилки
-    broadcast_message = State()
+    # Стани для розсилки
+    broadcast_message_all = State()
+    awaiting_specific_ids = State()
+    broadcast_message_specific = State()
 
 
 # --- Функція для перевірки, чи є користувач адміном ---
@@ -94,20 +97,26 @@ async def send_welcome(message: types.Message, state: FSMContext):
 
 @dp.message_handler(text='ℹ️ Інфо', state='*')
 async def send_info(message: types.Message):
+    # ВИПРАВЛЕНО: Додано пробіли для кращої читабельності
     await message.answer("""
-🔹 *Хто ми?* KYC Team — це проєкт для заробітку на простих верифікаціях криптобірж. Середня виплата від 100 до 400 грн за одну заявку.
+🔹 *Хто ми?*
+KYC Team — це проєкт для заробітку на простих верифікаціях криптобірж. Середня виплата від 100 до 400 грн за одну заявку.
 
-🔹 *Як працює?* 1. Отримуєте коротку інструкцію.
+🔹 *Як працює?*
+1. Отримуєте коротку інструкцію.
 2. Проходите просту перевірку з паспортом та селфі (10–15 хвилин).
 3. Отримуєте оплату одразу після перевірки.
 
-🔹 *Де відгуки?* В нас є жива група з відгуками, завданнями та підтримкою ✅ Після заявки — додаємо вас!
+🔹 *Де відгуки?*
+В нас є жива група з відгуками, завданнями та підтримкою ✅ Після заявки — додаємо вас!
 
-🔹 *Це законно?* Так. Ви просто підтверджуєте акаунти на криптобіржах, ніяких банків або кредитів.
+🔹 *Це законно?*
+Так. Ви просто підтверджуєте акаунти на криптобіржах, ніяких банків або кредитів.
 """, parse_mode=types.ParseMode.MARKDOWN)
 
 @dp.message_handler(text='❓ FAQ', state='*')
 async def send_faq(message: types.Message):
+    # ВИПРАВЛЕНО: Додано пробіли для кращої читабельності
     await message.answer("""
 ❓ *Часті питання:*
     
@@ -214,7 +223,7 @@ async def process_phone(message: types.Message, state: FSMContext):
         logging.error(f"❌ Помилка відправки повідомлення адміну для заявки {user.id}: {e}")
 
     try:
-        # ВИПРАВЛЕНО: Використовуємо """ для коректного багаторядкового тексту
+        # ВИПРАВЛЕНО: Додано пробіли для кращої читабельності
         final_user_message = """✅ Дякуємо, вашу заявку отримано!
 
 Наш менеджер зв'яжеться з вами найближчим часом.
@@ -222,13 +231,13 @@ async def process_phone(message: types.Message, state: FSMContext):
 🔗 Тим часом, долучайтесь до нашої групи з актуальними завданнями:
 👉 https://t.me/destorkycteam
 
-В групі ви знайдете:
+*В групі ви знайдете:*
 — живі відгуки ✅
 — актуальні офери 💸
 — підтримку на кожному етапу
 
 Приєднуйтесь і очікуйте сповіщення про нові завдання, також дуже раджу прочитати закріплені повідомлення для більшої ясності як проходить робочий процес!"""
-        await message.answer(final_user_message, reply_markup=main_menu)
+        await message.answer(final_user_message, reply_markup=main_menu, parse_mode=types.ParseMode.MARKDOWN)
     except Exception as e:
         logging.error(f"❌ Помилка відправки фінального повідомлення користувачу {user.id}: {e}")
         await message.answer("Дякуємо, вашу заявку отримано!")
@@ -238,13 +247,14 @@ async def process_phone(message: types.Message, state: FSMContext):
 
 # --- БЛОК РОЗСИЛКИ ---
 
+# Розсилка всім
 @dp.message_handler(is_admin, commands=['sendall'], state='*')
-async def start_broadcast(message: types.Message):
-    await message.answer("Надішліть повідомлення, яке потрібно розіслати всім користувачам, що заповнили анкету.")
-    await ApplicationStates.broadcast_message.set()
+async def start_broadcast_all(message: types.Message):
+    await message.answer("Надішліть повідомлення, яке потрібно розіслати *всім* користувачам, що заповнили анкету.", parse_mode="Markdown")
+    await ApplicationStates.broadcast_message_all.set()
 
-@dp.message_handler(is_admin, state=ApplicationStates.broadcast_message, content_types=types.ContentTypes.ANY)
-async def process_broadcast_message(message: types.Message, state: FSMContext):
+@dp.message_handler(is_admin, state=ApplicationStates.broadcast_message_all, content_types=types.ContentTypes.ANY)
+async def process_broadcast_all(message: types.Message, state: FSMContext):
     await state.finish()
     
     if not sheet:
@@ -252,9 +262,7 @@ async def process_broadcast_message(message: types.Message, state: FSMContext):
         return
 
     try:
-        # ВИПРАВЛЕНО: ID користувачів знаходяться у 8-му стовпці (G)
         all_user_ids = sheet.col_values(8) 
-        # Видаляємо заголовок стовпця (якщо він є) і залишаємо тільки унікальні ID
         unique_user_ids = set(all_user_ids[1:]) 
     except Exception as e:
         await message.answer(f"❌ Помилка читання ID з Google Sheets: {e}")
@@ -265,14 +273,57 @@ async def process_broadcast_message(message: types.Message, state: FSMContext):
         return
 
     await message.answer(f"✅ Починаю розсилку для {len(unique_user_ids)} користувачів...")
+    success_count, error_count = await broadcast_to_users(unique_user_ids, message)
+    await message.answer(
+        f"🏁 Розсилку завершено!\n\n"
+        f"✅ Успішно надіслано: {success_count}\n"
+        f"❌ Помилок (користувач заблокував бота): {error_count}"
+    )
 
+# НОВА ФУНКЦІЯ: Розсилка конкретним користувачам
+@dp.message_handler(is_admin, commands=['send'], state='*')
+async def start_broadcast_specific(message: types.Message):
+    await message.answer("Введіть ID користувачів, яким потрібно надіслати повідомлення.\nМожна один або декілька, через пробіл або кому.", reply_markup=ReplyKeyboardRemove())
+    await ApplicationStates.awaiting_specific_ids.set()
+
+@dp.message_handler(is_admin, state=ApplicationStates.awaiting_specific_ids)
+async def process_specific_ids(message: types.Message, state: FSMContext):
+    # Використовуємо регулярний вираз для пошуку всіх чисел у тексті
+    user_ids = re.findall(r'\d+', message.text)
+    
+    if not user_ids:
+        await message.answer("Не знайдено жодного ID. Спробуйте ще раз, наприклад: `12345 67890`", parse_mode="Markdown")
+        return
+
+    async with state.proxy() as data:
+        data['user_ids_to_send'] = user_ids
+
+    await message.answer(f"Знайдено {len(user_ids)} ID. Тепер надішліть повідомлення для розсилки.")
+    await ApplicationStates.broadcast_message_specific.set()
+
+@dp.message_handler(is_admin, state=ApplicationStates.broadcast_message_specific, content_types=types.ContentTypes.ANY)
+async def process_broadcast_specific(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        user_ids = data['user_ids_to_send']
+    
+    await state.finish()
+
+    await message.answer(f"✅ Починаю розсилку для {len(user_ids)} користувачів...")
+    success_count, error_count = await broadcast_to_users(user_ids, message)
+    await message.answer(
+        f"🏁 Розсилку завершено!\n\n"
+        f"✅ Успішно надіслано: {success_count}\n"
+        f"❌ Помилок: {error_count}"
+    )
+
+
+# Допоміжна функція для надсилання повідомлень
+async def broadcast_to_users(user_ids, message_to_copy):
     success_count = 0
     error_count = 0
-
-    for user_id in unique_user_ids:
+    for user_id in user_ids:
         try:
-            # Копіюємо та надсилаємо повідомлення
-            await message.copy_to(chat_id=user_id)
+            await message_to_copy.copy_to(chat_id=user_id)
             success_count += 1
             logging.info(f"Надіслано повідомлення користувачу {user_id}")
         except Exception as e:
@@ -280,12 +331,7 @@ async def process_broadcast_message(message: types.Message, state: FSMContext):
             logging.error(f"Не вдалося надіслати повідомлення користувачу {user_id}: {e}")
         
         await asyncio.sleep(0.1) # Невелика затримка, щоб не отримати бан від Telegram
-
-    await message.answer(
-        f"🏁 Розсилку завершено!\n\n"
-        f"✅ Успішно надіслано: {success_count}\n"
-        f"❌ Помилок (користувач заблокував бота): {error_count}"
-    )
+    return success_count, error_count
 
 
 # --- Налаштування Webhook для Flask ---
